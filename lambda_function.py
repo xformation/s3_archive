@@ -9,14 +9,7 @@ import pandas as pd
 
 sns = boto3.client('sns')
 
-sqsclient = boto3.client('sqs')
-
-
 def lambda_handler(event, context):
-
-    # print(event)
-    # Create an S3 client
-    # s3 = boto3.client('s3')
     
     s3 = boto3.client('s3')
 
@@ -30,8 +23,12 @@ def lambda_handler(event, context):
     
     logs = []
     
+    # Source Bucket Hardcode
     report_bucket = 'trainingusbatch'
+
+    #Bucket for Logs
     log_bucket = 'trainingusbatch'
+    
     #For writing log to buffer
     csv_buffer = StringIO()
     csv_io = csv.writer(csv_buffer)
@@ -41,39 +38,30 @@ def lambda_handler(event, context):
 
     archreq_filename = key
     
-    # getting the archive json input file 
+    # Getting the archive json input file 
     fname = s3.get_object(Bucket=bucket, Key=key)
     
-    # print(key)
+    # Reading the input file
     try:
-        # TODO: write code...
-        infile = fname['Body'].read().decode('utf-8') #decode('windows-1252')
+        infile = fname['Body'].read().decode('utf-8') 
     except:
         # print('we were unable to decode the file')
         snsresponse = sns.publish(
             TopicArn='arn:aws:sns:us-east-1:657907747545:SMSTopic',   
             Message='we were unable to decode the file '+ key,   
         )
-        print(snsresponse)
     
     archreq_json=json.loads(infile)
     
+    #collecting BatchID and Request date from the input file
     batchid = archreq_json['ArchiveRequest']['BatchID']
     req_date = archreq_json['ArchiveRequest']['RequestDate']
     
-    log_filename = batchid + today + "_archive.csv"
+    #Log File name format
+    log_filename = batchid + today + "_log.csv"
     
-    # header = str("Requestdate") + str("     ") + str("Current SC") +("    ") + str("Batchid") + str("     ") + str('PathId') + str("     ") + str("key_prefix") +  str("    ") + str("Archived Class") + str("      Status Code")
-    
-    # print all the paths and count number of files
-    
-    
-    # fieldnames = ["Requestdate","Current SC","Batchid","PathId","key_prefix","Archived Class","Status Code"]
-    
-    
+    #Parse input file for File url, archive files and generate logs
     for paths in archreq_json['ArchiveRequest']['ToArchive']['i']:
-        
-        # print(paths['PathId'])
         
         key = paths['File_URL']
         key_split = key.split('//', 1)
@@ -85,22 +73,18 @@ def lambda_handler(event, context):
       
         # count = count + 1
         
-        # print(req_date, batchid, paths['PathId'], key_prefix )
         try:
             bc_sc = ""
             key = s3_obj.Object(report_bucket, key_prefix)
             bc_sc = key.storage_class
-            print(bc_sc)
         except:
             print('key not found')
             logline = dict(Requestdate= req_date, currentsc = "Key not found", batch_id = batchid, path = paths['PathId'],key_prefix = key_prefix )
             logs.append(logline)
             continue
-            # bc_sc = ""
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
         if bc_sc == "DEEP_ARCHIVE":
             logline = dict(Requestdate= req_date, currentsc = "Already Archived", batch_id = batchid, path = paths['PathId'],key_prefix = key_prefix )
-            # print(logline)
             logs.append(logline)
     
         else:
@@ -113,31 +97,23 @@ def lambda_handler(event, context):
                 'StorageClass': 'DEEP_ARCHIVE',
                 'MetadataDirective': 'COPY'
             }
-            print("--KeyPrefix")
-            print(key_prefix)
             try:
                 s3_obj.meta.client.copy(copy_source, report_bucket, key_prefix, ExtraArgs)
                 
                 logline = dict(Requestdate= req_date, currentsc = bc_sc, batch_id = batchid, path = paths['PathId'],key_prefix = key_prefix )
                 logs.append(logline)
-            except:
-                print("key not found")
-                # Need to update key not found in the logs 
+            except: 
                 logline = dict(Requestdate= req_date, currentsc = "Key not found", batch_id = batchid, path = paths['PathId'],key_prefix = key_prefix )
                 logs.append(logline)
-            # key = s3.Object(BUCKET, key_prefix)
         count = count + 1
-    # csv_buffer = logs
-    # print(csv_buffer)
-  
-        
+
+    #Conver the logs into dataFrame        
     dataFrame = pd.DataFrame(data=logs, columns = ['Requestdate','currentsc','batch_id','path','key_prefix'])
-    
-    print(dataFrame)
   
+    # Writing the dataframe to io buffer
     dataFrame.to_csv(csv_buffer)
     
-
+    # Create a s3 resource and create the file in s3
     s3_resource = boto3.resource('s3')
     s3_resource.Object(log_bucket, log_filename).put(Body=csv_buffer.getvalue())
     
@@ -149,13 +125,7 @@ def lambda_handler(event, context):
                 'Key': archreq_filename,
             }
     # archreq_inkey = archreq_filename.split('/', 1)
-    print(archreq_inkey[1])
     processed_key = 'arch_request' + '/' + 'processed_arch_req' + '/' + archreq_inkey[1]
-    print(processed_key)
+
     
     s3_resource.meta.client.copy(copy_source, 'archrequest', processed_key)
-    
-    # try:
-    #     s3.meta.client.copy(copy_source, 'archrequest', processed_key)
-    # except:
-    #     print("key not found")
