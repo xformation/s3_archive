@@ -45,7 +45,6 @@ def lambda_handler(event, context):
     try:
         infile = fname['Body'].read().decode('utf-8') 
     except:
-        # print('we were unable to decode the file')
         snsresponse = sns.publish(
             TopicArn='arn:aws:sns:us-east-1:657907747545:SMSTopic',   
             Message='we were unable to decode the file '+ key,   
@@ -78,7 +77,6 @@ def lambda_handler(event, context):
             key = s3_obj.Object(report_bucket, key_prefix)
             bc_sc = key.storage_class
         except:
-            print('key not found')
             logline = dict(Requestdate= req_date, currentsc = "Key not found", batch_id = batchid, path = paths['PathId'],key_prefix = key_prefix )
             logs.append(logline)
             continue
@@ -127,5 +125,5 @@ def lambda_handler(event, context):
     # archreq_inkey = archreq_filename.split('/', 1)
     processed_key = 'arch_request' + '/' + 'processed_arch_req' + '/' + archreq_inkey[1]
 
-    
+    # Copying the input file to processed location
     s3_resource.meta.client.copy(copy_source, 'archrequest', processed_key)
